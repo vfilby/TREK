@@ -453,6 +453,34 @@ router.get('/place-photo/:placeId', authenticate, async (req: Request, res: Resp
 });
 
 // Reverse geocoding via Nominatim
+router.get('/geocode', authenticate, async (req: Request, res: Response) => {
+  const { address, lang } = req.query as { address: string; lang?: string };
+  if (!address || !address.trim()) return res.status(400).json({ error: 'address is required' });
+  try {
+    const params = new URLSearchParams({
+      q: address.trim(),
+      format: 'json',
+      addressdetails: '1',
+      limit: '1',
+      'accept-language': lang || 'en',
+    });
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+      headers: { 'User-Agent': UA },
+    });
+    if (!response.ok) return res.json({ lat: null, lng: null });
+    const data = await response.json() as NominatimResult[];
+    if (!data.length) return res.json({ lat: null, lng: null });
+    const result = data[0];
+    res.json({
+      lat: parseFloat(result.lat) || null,
+      lng: parseFloat(result.lon) || null,
+      display_name: result.display_name || null,
+    });
+  } catch {
+    res.json({ lat: null, lng: null });
+  }
+});
+
 router.get('/reverse', authenticate, async (req: Request, res: Response) => {
   const { lat, lng, lang } = req.query as { lat: string; lng: string; lang?: string };
   if (!lat || !lng) return res.status(400).json({ error: 'lat and lng required' });

@@ -96,8 +96,30 @@ export default function PlaceFormModal({
     setPendingFiles([])
   }, [place, prefillCoords, isOpen])
 
+  const [isGeocoding, setIsGeocoding] = useState(false)
+
   const handleChange = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }))
+  }
+
+  const handleAddressBlur = async () => {
+    const address = form.address.trim()
+    if (!address || form.lat || form.lng) return
+    setIsGeocoding(true)
+    try {
+      const result = await mapsApi.geocode(address, language)
+      if (result.lat && result.lng) {
+        setForm(prev => ({
+          ...prev,
+          lat: String(result.lat),
+          lng: String(result.lng),
+        }))
+      }
+    } catch {
+      // Geocoding is best-effort — don't show errors
+    } finally {
+      setIsGeocoding(false)
+    }
   }
 
   const handleMapsSearch = async () => {
@@ -272,9 +294,15 @@ export default function PlaceFormModal({
             type="text"
             value={form.address}
             onChange={e => handleChange('address', e.target.value)}
+            onBlur={handleAddressBlur}
             placeholder={t('places.formAddressPlaceholder')}
             className="form-input"
           />
+          {isGeocoding && (
+            <p className="text-xs mt-1" style={{ color: 'var(--text-faint)' }}>
+              {t('places.geocoding') || 'Looking up coordinates…'}
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-2 mt-2">
             <input
               type="number"
