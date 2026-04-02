@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock config before importing mfaCrypto so it uses a stable test secret
 vi.mock('../../config', () => ({
   JWT_SECRET: 'test-jwt-secret-for-mfa-crypto-tests',
+  ENCRYPTION_KEY: 'test-encryption-key-for-mfa-crypto-tests',
 }));
 
 import { encryptMfaSecret, decryptMfaSecret } from '../../services/mfaCrypto';

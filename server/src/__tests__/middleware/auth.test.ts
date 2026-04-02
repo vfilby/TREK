@@ -7,6 +7,7 @@ const TEST_JWT_SECRET = 'test-secret-for-auth-middleware';
 // Mock config and database before importing auth middleware
 vi.mock('../../config', () => ({
   JWT_SECRET: 'test-secret-for-auth-middleware',
+  ENCRYPTION_KEY: 'test-encryption-key-for-auth-middleware',
 }));
 
 const mockDbPrepare = vi.fn();
@@ -40,7 +41,7 @@ describe('authenticate', () => {
     const next = vi.fn();
     authenticate(req, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith({ error: 'Access token required' });
+    expect(res.json).toHaveBeenCalledWith({ error: 'Access token required', code: 'AUTH_REQUIRED' });
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -60,7 +61,7 @@ describe('authenticate', () => {
     const next = vi.fn();
     authenticate(req, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith({ error: 'Invalid or expired token' });
+    expect(res.json).toHaveBeenCalledWith({ error: 'Invalid or expired token', code: 'AUTH_REQUIRED' });
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -82,7 +83,7 @@ describe('authenticate', () => {
     const next = vi.fn();
     authenticate(req, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith({ error: 'User not found' });
+    expect(res.json).toHaveBeenCalledWith({ error: 'User not found', code: 'AUTH_REQUIRED' });
     expect(next).not.toHaveBeenCalled();
   });
 

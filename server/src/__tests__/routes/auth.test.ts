@@ -10,6 +10,7 @@ const TEST_SECRET = 'integration-test-jwt-secret';
 // Mock config
 vi.mock('../../config', () => ({
   JWT_SECRET: 'integration-test-jwt-secret',
+  ENCRYPTION_KEY: 'integration-test-encryption-key',
 }));
 
 // We'll create a fresh in-memory DB for each test and inject it
@@ -118,7 +119,7 @@ describe('Auth Routes - Registration', () => {
     const res = await http.post('/api/auth/register', {
       username: 'admin',
       email: 'admin@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.status).toBe(201);
     expect(res.body.user.role).toBe('admin');
@@ -131,12 +132,12 @@ describe('Auth Routes - Registration', () => {
     await http.post('/api/auth/register', {
       username: 'admin',
       email: 'admin@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     const res = await http.post('/api/auth/register', {
       username: 'user2',
       email: 'user2@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.status).toBe(201);
     expect(res.body.user.role).toBe('user');
@@ -165,7 +166,7 @@ describe('Auth Routes - Registration', () => {
     const res = await http.post('/api/auth/register', {
       username: 'test',
       email: 'test@test.com',
-      password: 'password1',
+      password: 'password1!',
     });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/uppercase/);
@@ -175,7 +176,7 @@ describe('Auth Routes - Registration', () => {
     const res = await http.post('/api/auth/register', {
       username: 'test',
       email: 'test@test.com',
-      password: 'PASSWORD1',
+      password: 'PASSWORD1!',
     });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/lowercase/);
@@ -185,7 +186,7 @@ describe('Auth Routes - Registration', () => {
     const res = await http.post('/api/auth/register', {
       username: 'test',
       email: 'test@test.com',
-      password: 'Passwordx',
+      password: 'Passwordx!',
     });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/number/);
@@ -195,7 +196,7 @@ describe('Auth Routes - Registration', () => {
     const res = await http.post('/api/auth/register', {
       username: 'test',
       email: 'not-an-email',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/email/i);
@@ -205,12 +206,12 @@ describe('Auth Routes - Registration', () => {
     await http.post('/api/auth/register', {
       username: 'user1',
       email: 'test@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     const res = await http.post('/api/auth/register', {
       username: 'user2',
       email: 'TEST@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.status).toBe(409);
   });
@@ -219,12 +220,12 @@ describe('Auth Routes - Registration', () => {
     await http.post('/api/auth/register', {
       username: 'Alice',
       email: 'alice@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     const res = await http.post('/api/auth/register', {
       username: 'alice',
       email: 'different@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.status).toBe(409);
   });
@@ -233,12 +234,12 @@ describe('Auth Routes - Registration', () => {
     await http.post('/api/auth/register', {
       username: 'taken',
       email: 'taken@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     const res = await http.post('/api/auth/register', {
       username: 'taken',
       email: 'other@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     // Should NOT say "email already exists" or "username already exists"
     expect(res.body.error).not.toMatch(/email/i);
@@ -250,7 +251,7 @@ describe('Auth Routes - Registration', () => {
     const res = await http.post('/api/auth/register', {
       username: 'newuser',
       email: 'new@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.status).toBe(201);
     const decoded = jwt.verify(res.body.token, TEST_SECRET) as any;
@@ -262,7 +263,7 @@ describe('Auth Routes - Registration', () => {
     const res = await http.post('/api/auth/register', {
       username: 'newuser',
       email: 'new@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.body.user.password_hash).toBeUndefined();
     expect(res.body.user.mfa_secret).toBeUndefined();
@@ -282,7 +283,7 @@ describe('Auth Routes - Login', () => {
     http = request(app);
 
     // Seed a user
-    const hash = bcrypt.hashSync('Password1', 12);
+    const hash = bcrypt.hashSync('T3stPass!', 12);
     testDb.prepare(
       'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
     ).run('alice', 'alice@test.com', hash, 'user');
@@ -296,7 +297,7 @@ describe('Auth Routes - Login', () => {
   it('logs in with valid credentials', async () => {
     const res = await http.post('/api/auth/login', {
       email: 'alice@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.status).toBe(200);
     expect(res.body.token).toBeDefined();
@@ -306,7 +307,7 @@ describe('Auth Routes - Login', () => {
   it('login is case-insensitive on email', async () => {
     const res = await http.post('/api/auth/login', {
       email: 'ALICE@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.status).toBe(200);
     expect(res.body.token).toBeDefined();
@@ -324,7 +325,7 @@ describe('Auth Routes - Login', () => {
   it('rejects non-existent email', async () => {
     const res = await http.post('/api/auth/login', {
       email: 'nobody@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.status).toBe(401);
     // Same error message for both cases (no user enumeration)
@@ -339,7 +340,7 @@ describe('Auth Routes - Login', () => {
   it('does not return sensitive fields on login', async () => {
     const res = await http.post('/api/auth/login', {
       email: 'alice@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.body.user.password_hash).toBeUndefined();
     expect(res.body.user.mfa_secret).toBeUndefined();
@@ -351,7 +352,7 @@ describe('Auth Routes - Login', () => {
   it('updates last_login on successful login', async () => {
     await http.post('/api/auth/login', {
       email: 'alice@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     const user = testDb.prepare('SELECT last_login FROM users WHERE email = ?').get('alice@test.com') as any;
     expect(user.last_login).not.toBeNull();
@@ -371,7 +372,7 @@ describe('Auth Routes - GET /me', () => {
     app = createApp();
     http = request(app);
 
-    const hash = bcrypt.hashSync('Password1', 12);
+    const hash = bcrypt.hashSync('T3stPass!', 12);
     const result = testDb.prepare(
       'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
     ).run('alice', 'alice@test.com', hash, 'user');
@@ -421,7 +422,7 @@ describe('Auth Routes - Password Change', () => {
     app = createApp();
     http = request(app);
 
-    const hash = bcrypt.hashSync('Password1', 12);
+    const hash = bcrypt.hashSync('T3stPass!', 12);
     const result = testDb.prepare(
       'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
     ).run('alice', 'alice@test.com', hash, 'user');
@@ -436,7 +437,7 @@ describe('Auth Routes - Password Change', () => {
   it('changes password with valid current password', async () => {
     const res = await http.put(
       '/api/auth/me/password',
-      { current_password: 'Password1', new_password: 'NewPassword2' },
+      { current_password: 'T3stPass!', new_password: 'N3wPass!x' },
       { Authorization: `Bearer ${token}` }
     );
     expect(res.status).toBe(200);
@@ -445,7 +446,7 @@ describe('Auth Routes - Password Change', () => {
     // Verify new password works
     const loginRes = await http.post('/api/auth/login', {
       email: 'alice@test.com',
-      password: 'NewPassword2',
+      password: 'N3wPass!x',
     });
     expect(loginRes.status).toBe(200);
   });
@@ -453,7 +454,7 @@ describe('Auth Routes - Password Change', () => {
   it('rejects password change with wrong current password', async () => {
     const res = await http.put(
       '/api/auth/me/password',
-      { current_password: 'WrongPass1', new_password: 'NewPassword2' },
+      { current_password: 'WrongPass1', new_password: 'N3wPass!x' },
       { Authorization: `Bearer ${token}` }
     );
     expect(res.status).toBe(401);
@@ -462,7 +463,7 @@ describe('Auth Routes - Password Change', () => {
   it('rejects weak new password', async () => {
     const res = await http.put(
       '/api/auth/me/password',
-      { current_password: 'Password1', new_password: 'weak' },
+      { current_password: 'T3stPass!', new_password: 'weak' },
       { Authorization: `Bearer ${token}` }
     );
     expect(res.status).toBe(400);
@@ -471,7 +472,7 @@ describe('Auth Routes - Password Change', () => {
   it('rejects new password without complexity requirements', async () => {
     const res = await http.put(
       '/api/auth/me/password',
-      { current_password: 'Password1', new_password: 'alllowercase1' },
+      { current_password: 'T3stPass!', new_password: 'alllowercase1!' },
       { Authorization: `Bearer ${token}` }
     );
     expect(res.status).toBe(400);
@@ -498,7 +499,7 @@ describe('Auth Routes - Account Deletion', () => {
   });
 
   it('prevents deletion of last admin account', async () => {
-    const hash = bcrypt.hashSync('Password1', 12);
+    const hash = bcrypt.hashSync('T3stPass!', 12);
     const result = testDb.prepare(
       'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
     ).run('admin', 'admin@test.com', hash, 'admin');
@@ -512,7 +513,7 @@ describe('Auth Routes - Account Deletion', () => {
   });
 
   it('allows deletion of non-admin user', async () => {
-    const hash = bcrypt.hashSync('Password1', 12);
+    const hash = bcrypt.hashSync('T3stPass!', 12);
     const result = testDb.prepare(
       'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
     ).run('user1', 'user1@test.com', hash, 'user');
@@ -530,7 +531,7 @@ describe('Auth Routes - Account Deletion', () => {
   });
 
   it('allows admin deletion when other admins exist', async () => {
-    const hash = bcrypt.hashSync('Password1', 12);
+    const hash = bcrypt.hashSync('T3stPass!', 12);
     testDb.prepare(
       'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
     ).run('admin1', 'admin1@test.com', hash, 'admin');
@@ -559,7 +560,7 @@ describe('Auth Routes - MFA Login Flow', () => {
     http = request(app);
 
     // Create user with MFA enabled
-    const hash = bcrypt.hashSync('Password1', 12);
+    const hash = bcrypt.hashSync('T3stPass!', 12);
     testDb.prepare(
       'INSERT INTO users (username, email, password_hash, role, mfa_enabled, mfa_secret) VALUES (?, ?, ?, ?, ?, ?)'
     ).run('mfauser', 'mfa@test.com', hash, 'user', 1, 'encrypted-secret');
@@ -573,7 +574,7 @@ describe('Auth Routes - MFA Login Flow', () => {
   it('returns mfa_required when MFA is enabled', async () => {
     const res = await http.post('/api/auth/login', {
       email: 'mfa@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     expect(res.status).toBe(200);
     expect(res.body.mfa_required).toBe(true);
@@ -586,7 +587,7 @@ describe('Auth Routes - MFA Login Flow', () => {
   it('mfa_token has short expiry and purpose claim', async () => {
     const res = await http.post('/api/auth/login', {
       email: 'mfa@test.com',
-      password: 'Password1',
+      password: 'T3stPass!',
     });
     const decoded = jwt.verify(res.body.mfa_token, TEST_SECRET) as any;
     expect(decoded.purpose).toBe('mfa_login');
