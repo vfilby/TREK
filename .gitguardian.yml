@@ -1,0 +1,6 @@
+paths-ignore:
+  - "**/src/__tests__/**"
+  - "**/*.test.ts"
+  - "**/*.test.js"
+  - "**/*.spec.ts"
+  - "**/*.spec.js"
