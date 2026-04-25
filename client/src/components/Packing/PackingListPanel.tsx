@@ -208,9 +208,14 @@ interface ArtikelZeileProps {
   canEdit?: boolean
 }
 
+// A category's first item is seeded with this sentinel because the server
+// rejects empty names. Treat it as a placeholder in the UI.
+const PACKING_PLACEHOLDER_NAME = '...'
+
 function ArtikelZeile({ item, tripId, categories, onCategoryChange, bagTrackingEnabled, bags = [], onCreateBag, canEdit = true }: ArtikelZeileProps) {
+  const isPlaceholder = item.name === PACKING_PLACEHOLDER_NAME
   const [editing, setEditing] = useState(false)
-  const [editName, setEditName] = useState(item.name)
+  const [editName, setEditName] = useState(isPlaceholder ? '' : item.name)
   const [hovered, setHovered] = useState(false)
   const [showCatPicker, setShowCatPicker] = useState(false)
   const [showBagPicker, setShowBagPicker] = useState(false)
@@ -223,7 +228,7 @@ function ArtikelZeile({ item, tripId, categories, onCategoryChange, bagTrackingE
   const handleToggle = () => togglePackingItem(tripId, item.id, !item.checked)
 
   const handleSaveName = async () => {
-    if (!editName.trim()) { setEditing(false); setEditName(item.name); return }
+    if (!editName.trim()) { setEditing(false); setEditName(isPlaceholder ? '' : item.name); return }
     try { await updatePackingItem(tripId, item.id, { name: editName.trim() }); setEditing(false) }
     catch { toast.error(t('packing.toast.saveError')) }
   }
@@ -253,18 +258,32 @@ function ArtikelZeile({ item, tripId, categories, onCategoryChange, bagTrackingE
       }}
     >
       <button onClick={handleToggle} style={{
-        flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex',
-        color: item.checked ? '#10b981' : 'var(--text-faint)', transition: 'color 0.15s',
+        flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: 0, position: 'relative',
+        width: 18, height: 18,
+        color: item.checked ? '#10b981' : 'var(--text-faint)',
+        transition: 'color 200ms cubic-bezier(0.23,1,0.32,1)',
       }}>
-        {item.checked ? <CheckSquare size={18} /> : <Square size={18} />}
+        <Square size={18} style={{
+          position: 'absolute', inset: 0,
+          opacity: item.checked ? 0 : 1,
+          transform: item.checked ? 'scale(0.7)' : 'scale(1)',
+          transition: 'opacity 180ms cubic-bezier(0.23,1,0.32,1), transform 180ms cubic-bezier(0.23,1,0.32,1)',
+        }} />
+        <CheckSquare size={18} style={{
+          position: 'absolute', inset: 0,
+          opacity: item.checked ? 1 : 0,
+          transform: item.checked ? 'scale(1)' : 'scale(0.5)',
+          transition: 'opacity 200ms cubic-bezier(0.23,1,0.32,1), transform 220ms cubic-bezier(0.34,1.56,0.64,1)',
+        }} />
       </button>
 
       {editing && canEdit ? (
         <input
           type="text" value={editName} autoFocus
+          placeholder={isPlaceholder ? '...' : undefined}
           onChange={e => setEditName(e.target.value)}
           onBlur={handleSaveName}
-          onKeyDown={e => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') { setEditing(false); setEditName(item.name) } }}
+          onKeyDown={e => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') { setEditing(false); setEditName(isPlaceholder ? '' : item.name) } }}
           style={{ flex: 1, fontSize: 13.5, padding: '2px 8px', borderRadius: 6, border: '1px solid var(--border-primary)', outline: 'none', fontFamily: 'inherit' }}
         />
       ) : (
@@ -273,7 +292,8 @@ function ArtikelZeile({ item, tripId, categories, onCategoryChange, bagTrackingE
           style={{
             flex: 1, fontSize: 13.5,
             cursor: !canEdit || item.checked ? 'default' : 'text',
-            color: item.checked ? 'var(--text-faint)' : 'var(--text-primary)',
+            color: isPlaceholder ? 'var(--text-faint)' : (item.checked ? 'var(--text-faint)' : 'var(--text-primary)'),
+            transition: 'color 200ms cubic-bezier(0.23,1,0.32,1)',
             textDecoration: item.checked ? 'line-through' : 'none',
           }}
         >
@@ -467,6 +487,7 @@ function KategorieGruppe({ kategorie, items, tripId, allCategories, onRename, on
   const [showAddItem, setShowAddItem] = useState(false)
   const [newItemName, setNewItemName] = useState('')
   const addItemRef = useRef<HTMLInputElement>(null)
+  const menuBtnRef = useRef<HTMLButtonElement>(null)
   const assigneeDropdownRef = useRef<HTMLDivElement>(null)
   const { togglePackingItem } = useTripStore()
   const toast = useToast()
@@ -629,22 +650,27 @@ function KategorieGruppe({ kategorie, items, tripId, allCategories, onRename, on
         </span>
 
         <div style={{ position: 'relative' }}>
-          <button onClick={() => setShowMenu(m => !m)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', borderRadius: 6, display: 'flex', color: 'var(--text-faint)' }}
+          <button ref={menuBtnRef} onClick={() => setShowMenu(m => !m)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', borderRadius: 6, display: 'flex', color: 'var(--text-faint)' }}
             onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-faint)'}>
             <MoreHorizontal size={15} />
           </button>
-          {showMenu && (
-            <div style={{ position: 'absolute', right: 0, top: '100%', zIndex: 50, background: 'var(--bg-card)', border: '1px solid var(--border-primary)', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', padding: 4, minWidth: 170 }}
-              onMouseLeave={() => setShowMenu(false)}>
-              {canEdit && <MenuItem icon={<Pencil size={13} />} label={t('packing.menuRename')} onClick={() => { setEditingName(true); setShowMenu(false) }} />}
-              <MenuItem icon={<CheckCheck size={13} />} label={t('packing.menuCheckAll')} onClick={() => { handleCheckAll(); setShowMenu(false) }} />
-              <MenuItem icon={<RotateCcw size={13} />} label={t('packing.menuUncheckAll')} onClick={() => { handleUncheckAll(); setShowMenu(false) }} />
-              {canEdit && <>
-              <div style={{ height: 1, background: 'var(--bg-tertiary)', margin: '4px 0' }} />
-              <MenuItem icon={<Trash2 size={13} />} label={t('packing.menuDeleteCat')} danger onClick={handleDeleteAll} />
-              </>}
-            </div>
-          )}
+          {showMenu && (() => {
+            const rect = menuBtnRef.current?.getBoundingClientRect();
+            return (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowMenu(false)} />
+              <div style={{ position: 'fixed', right: rect ? window.innerWidth - rect.right : 0, top: rect ? rect.bottom + 4 : 0, zIndex: 100, background: 'var(--bg-card)', border: '1px solid var(--border-primary)', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', padding: 4, minWidth: 170 }}>
+                {canEdit && <MenuItem icon={<Pencil size={13} />} label={t('packing.menuRename')} onClick={() => { setEditingName(true); setShowMenu(false) }} />}
+                <MenuItem icon={<CheckCheck size={13} />} label={t('packing.menuCheckAll')} onClick={() => { handleCheckAll(); setShowMenu(false) }} />
+                <MenuItem icon={<RotateCcw size={13} />} label={t('packing.menuUncheckAll')} onClick={() => { handleUncheckAll(); setShowMenu(false) }} />
+                {canEdit && <>
+                <div style={{ height: 1, background: 'var(--bg-tertiary)', margin: '4px 0' }} />
+                <MenuItem icon={<Trash2 size={13} />} label={t('packing.menuDeleteCat')} danger onClick={handleDeleteAll} />
+                </>}
+              </div>
+            </>
+            );
+          })()}
         </div>
       </div>
 
@@ -723,9 +749,13 @@ function MenuItem({ icon, label, onClick, danger }: MenuItemProps) {
 interface PackingListPanelProps {
   tripId: number
   items: PackingItem[]
+  openImportSignal?: number
+  clearCheckedSignal?: number
+  saveTemplateSignal?: number
+  inlineHeader?: boolean
 }
 
-export default function PackingListPanel({ tripId, items }: PackingListPanelProps) {
+export default function PackingListPanel({ tripId, items, openImportSignal = 0, clearCheckedSignal = 0, saveTemplateSignal = 0, inlineHeader = true }: PackingListPanelProps) {
   const [filter, setFilter] = useState('alle') // 'alle' | 'offen' | 'erledigt'
   const [addingCategory, setAddingCategory] = useState(false)
   const [newCatName, setNewCatName] = useState('')
@@ -890,6 +920,31 @@ export default function PackingListPanel({ tripId, items }: PackingListPanelProp
   const [saveTemplateName, setSaveTemplateName] = useState('')
   const [showImportModal, setShowImportModal] = useState(false)
   const [importText, setImportText] = useState('')
+  const lastHandledImportSignal = useRef(openImportSignal)
+  const lastHandledClearSignal = useRef(clearCheckedSignal)
+  const lastHandledSaveSignal = useRef(saveTemplateSignal)
+
+  useEffect(() => {
+    if (openImportSignal !== lastHandledImportSignal.current && openImportSignal > 0) {
+      setShowImportModal(true)
+    }
+    lastHandledImportSignal.current = openImportSignal
+  }, [openImportSignal])
+
+  useEffect(() => {
+    if (clearCheckedSignal !== lastHandledClearSignal.current && clearCheckedSignal > 0) {
+      handleClearChecked()
+    }
+    lastHandledClearSignal.current = clearCheckedSignal
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearCheckedSignal])
+
+  useEffect(() => {
+    if (saveTemplateSignal !== lastHandledSaveSignal.current && saveTemplateSignal > 0) {
+      setShowSaveTemplate(true)
+    }
+    lastHandledSaveSignal.current = saveTemplateSignal
+  }, [saveTemplateSignal])
   const csvInputRef = useRef<HTMLInputElement>(null)
   const templateDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -910,10 +965,9 @@ export default function PackingListPanel({ tripId, items }: PackingListPanelProp
     setApplyingTemplate(true)
     try {
       const data = await packingApi.applyTemplate(tripId, templateId)
+      useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(data.items || [])] }))
       toast.success(t('packing.templateApplied', { count: data.count }))
       setShowTemplateDropdown(false)
-      // Reload packing items
-      window.location.reload()
     } catch {
       toast.error(t('packing.templateError'))
     } finally {
@@ -971,10 +1025,10 @@ export default function PackingListPanel({ tripId, items }: PackingListPanelProp
     if (parsed.length === 0) { toast.error(t('packing.importEmpty')); return }
     try {
       const result = await packingApi.bulkImport(tripId, parsed)
+      useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(result.items || [])] }))
       toast.success(t('packing.importSuccess', { count: result.count }))
       setImportText('')
       setShowImportModal(false)
-      window.location.reload()
     } catch { toast.error(t('packing.importError')) }
   }
 
@@ -993,16 +1047,43 @@ export default function PackingListPanel({ tripId, items }: PackingListPanelProp
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', ...font }}>
 
       {/* ── Header ── */}
-      <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid rgba(0,0,0,0.06)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>{t('packing.title')}</h2>
-            <p style={{ margin: '2px 0 0', fontSize: 12.5, color: 'var(--text-faint)' }}>
-              {items.length === 0 ? t('packing.empty') : t('packing.progress', { packed: abgehakt, total: items.length, percent: fortschritt })}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {canEdit && abgehakt > 0 && (
+      <div style={{ padding: inlineHeader ? '20px 24px 16px' : '0 0 16px', flexShrink: 0, borderBottom: inlineHeader ? '1px solid rgba(0,0,0,0.06)' : undefined }}>
+        <div style={{ display: 'flex', alignItems: inlineHeader ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 14 }}>
+          {inlineHeader ? (
+            <div>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>{t('packing.title')}</h2>
+              {items.length > 0 && (
+                <p style={{ margin: '2px 0 0', fontSize: 12.5, color: 'var(--text-faint)' }}>
+                  {t('packing.progress', { packed: abgehakt, total: items.length, percent: fortschritt })}
+                </p>
+              )}
+            </div>
+          ) : <span />}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {canEdit && items.length > 0 && showSaveTemplate && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="text" autoFocus
+                  value={saveTemplateName}
+                  onChange={e => setSaveTemplateName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveAsTemplate(); if (e.key === 'Escape') { setShowSaveTemplate(false); setSaveTemplateName('') } }}
+                  placeholder={t('packing.templateName')}
+                  style={{ fontSize: 12, padding: '5px 10px', borderRadius: 99, border: '1px solid var(--border-primary)', outline: 'none', fontFamily: 'inherit', width: 140, background: 'var(--bg-card)', color: 'var(--text-primary)' }}
+                />
+                <button onClick={handleSaveAsTemplate} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: '#10b981' }}><Check size={14} /></button>
+                <button onClick={() => { setShowSaveTemplate(false); setSaveTemplateName('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--text-faint)' }}><X size={14} /></button>
+              </div>
+            )}
+            {inlineHeader && canEdit && (
+              <button onClick={() => setShowImportModal(true)} style={{
+                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99,
+                border: '1px solid var(--border-primary)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                fontFamily: 'inherit', background: 'var(--bg-card)', color: 'var(--text-muted)',
+              }}>
+                <Upload size={12} /> <span className="hidden sm:inline">{t('packing.import')}</span>
+              </button>
+            )}
+            {inlineHeader && canEdit && abgehakt > 0 && (
               <button onClick={handleClearChecked} style={{
                 fontSize: 11.5, padding: '5px 10px', borderRadius: 99, border: '1px solid rgba(239,68,68,0.3)',
                 background: 'rgba(239,68,68,0.1)', color: '#ef4444', cursor: 'pointer', fontFamily: 'inherit',
@@ -1011,16 +1092,7 @@ export default function PackingListPanel({ tripId, items }: PackingListPanelProp
                 <span className="sm:hidden">{t('packing.clearCheckedShort', { count: abgehakt })}</span>
               </button>
             )}
-            {canEdit && (
-            <button onClick={() => setShowImportModal(true)} style={{
-              display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99,
-              border: '1px solid var(--border-primary)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
-              fontFamily: 'inherit', background: 'var(--bg-card)', color: 'var(--text-muted)',
-            }}>
-              <Upload size={12} /> <span className="hidden sm:inline">{t('packing.import')}</span>
-            </button>
-            )}
-            {canEdit && availableTemplates.length > 0 && (
+            {inlineHeader && canEdit && availableTemplates.length > 0 && (
               <div ref={templateDropdownRef} style={{ position: 'relative' }}>
                 <button onClick={() => setShowTemplateDropdown(v => !v)} disabled={applyingTemplate} style={{
                   display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99,
@@ -1059,31 +1131,14 @@ export default function PackingListPanel({ tripId, items }: PackingListPanelProp
                 )}
               </div>
             )}
-            {canEdit && items.length > 0 && (
-              <div style={{ position: 'relative' }}>
-                {showSaveTemplate ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input
-                      type="text" autoFocus
-                      value={saveTemplateName}
-                      onChange={e => setSaveTemplateName(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') handleSaveAsTemplate(); if (e.key === 'Escape') { setShowSaveTemplate(false); setSaveTemplateName('') } }}
-                      placeholder={t('packing.templateName')}
-                      style={{ fontSize: 12, padding: '5px 10px', borderRadius: 99, border: '1px solid var(--border-primary)', outline: 'none', fontFamily: 'inherit', width: 140, background: 'var(--bg-card)', color: 'var(--text-primary)' }}
-                    />
-                    <button onClick={handleSaveAsTemplate} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: '#10b981' }}><Check size={14} /></button>
-                    <button onClick={() => { setShowSaveTemplate(false); setSaveTemplateName('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--text-faint)' }}><X size={14} /></button>
-                  </div>
-                ) : (
-                  <button onClick={() => setShowSaveTemplate(true)} style={{
-                    display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99,
-                    border: '1px solid var(--border-primary)', fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
-                    background: 'var(--bg-card)', color: 'var(--text-muted)',
-                  }}>
-                    <FolderPlus size={12} /> <span className="hidden sm:inline">{t('packing.saveAsTemplate')}</span>
-                  </button>
-                )}
-              </div>
+            {inlineHeader && canEdit && items.length > 0 && !showSaveTemplate && (
+              <button onClick={() => setShowSaveTemplate(true)} style={{
+                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 99,
+                border: '1px solid var(--border-primary)', fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+                background: 'var(--bg-card)', color: 'var(--text-muted)',
+              }}>
+                <FolderPlus size={12} /> <span className="hidden sm:inline">{t('packing.saveAsTemplate')}</span>
+              </button>
             )}
             {bagTrackingEnabled && (
               <button onClick={() => setShowBagModal(true)} className="xl:!hidden"
@@ -1101,17 +1156,69 @@ export default function PackingListPanel({ tripId, items }: PackingListPanelProp
         </div>
 
           {items.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ height: 5, background: 'var(--bg-tertiary)', borderRadius: 99, overflow: 'hidden' }}>
+          <div className="hidden sm:block" style={{ marginTop: 14, marginBottom: 14 }}>
+            <div className="flex items-center" style={{ gap: 14 }}>
+              {fortschritt === 100 ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  fontSize: 16, fontWeight: 700, color: '#10b981',
+                  letterSpacing: '-0.01em', flexShrink: 0,
+                }}>
+                  <CheckCheck size={18} strokeWidth={2.5} />
+                  <span>{t('packing.allPacked')}</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexShrink: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline' }}>
+                    <span style={{
+                      fontSize: 22, fontWeight: 700, color: 'var(--text-primary)',
+                      fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em',
+                      lineHeight: 1,
+                    }}>{abgehakt}</span>
+                    <span style={{
+                      fontSize: 14, fontWeight: 500, color: 'var(--text-faint)',
+                      fontVariantNumeric: 'tabular-nums', lineHeight: 1, marginLeft: 1,
+                    }}>/{items.length}</span>
+                  </div>
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, padding: '2px 7px',
+                    borderRadius: 99, background: 'var(--bg-tertiary)',
+                    color: 'var(--text-muted)',
+                    fontVariantNumeric: 'tabular-nums',
+                    lineHeight: 1.4,
+                  }}>{fortschritt}%</span>
+                </div>
+              )}
+
               <div style={{
-                height: '100%', borderRadius: 99, transition: 'width 0.4s ease',
-                background: fortschritt === 100 ? '#10b981' : 'linear-gradient(90deg, var(--text-primary) 0%, var(--text-muted) 100%)',
-                width: `${fortschritt}%`,
-              }} />
+                flex: 1,
+                height: 8,
+                background: 'var(--bg-tertiary)',
+                borderRadius: 99,
+                overflow: 'hidden',
+                position: 'relative',
+                width: '100%',
+              }}>
+                <div style={{
+                  height: '100%',
+                  borderRadius: 99,
+                  transition: 'width 600ms cubic-bezier(0.23, 1, 0.32, 1), background 400ms ease, box-shadow 400ms ease',
+                  background: fortschritt === 100
+                    ? 'linear-gradient(90deg, #10b981 0%, #34d399 100%)'
+                    : 'var(--accent)',
+                  width: `${fortschritt}%`,
+                  boxShadow: fortschritt === 100 ? '0 0 14px rgba(16,185,129,0.45)' : 'none',
+                  position: 'relative',
+                }}>
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    background: 'linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0) 55%)',
+                    borderRadius: 99,
+                    pointerEvents: 'none',
+                  }} />
+                </div>
+              </div>
             </div>
-            {fortschritt === 100 && (
-              <p style={{ fontSize: 11.5, color: '#10b981', marginTop: 4, fontWeight: 600, margin: '4px 0 0' }}>{t('packing.allPacked')}</p>
-            )}
           </div>
         )}
 
@@ -1145,7 +1252,7 @@ export default function PackingListPanel({ tripId, items }: PackingListPanelProp
 
       {/* ── Filter-Tabs ── */}
       {items.length > 0 && (
-        <div style={{ display: 'flex', gap: 4, padding: '10px 16px 0', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 4, padding: '10px 0 0', flexShrink: 0 }}>
           {[['alle', t('packing.filterAll')], ['offen', t('packing.filterOpen')], ['erledigt', t('packing.filterDone')]].map(([id, label]) => (
             <button key={id} onClick={() => setFilter(id)} style={{
               padding: '4px 12px', borderRadius: 99, border: 'none', cursor: 'pointer',
@@ -1159,7 +1266,7 @@ export default function PackingListPanel({ tripId, items }: PackingListPanelProp
 
       {/* ── Liste + Bags Sidebar ── */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px 16px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 0 16px' }}>
         {items.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px' }}>
             <Luggage size={40} style={{ color: 'var(--text-faint)', display: 'block', margin: '0 auto 10px' }} />
@@ -1262,7 +1369,7 @@ export default function PackingListPanel({ tripId, items }: PackingListPanelProp
 
       {/* ── Bag Modal (mobile + click) ── */}
       {showBagModal && bagTrackingEnabled && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, paddingTop: 140, overflowY: 'auto' }}
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, paddingTop: 140, paddingBottom: 'calc(20px + var(--bottom-nav-h))', overflowY: 'auto' }}
           onClick={() => setShowBagModal(false)}>
           <div style={{ background: 'var(--bg-card)', borderRadius: 16, width: '100%', maxWidth: 360, maxHeight: 'calc(100vh - 80px)', overflow: 'auto', padding: 20, boxShadow: '0 16px 48px rgba(0,0,0,0.15)', flexShrink: 0 }}
             onClick={e => e.stopPropagation()}>

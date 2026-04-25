@@ -5,11 +5,9 @@ import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import fs from 'node:fs';
 
-import jwt from 'jsonwebtoken';
-import { JWT_SECRET } from './config';
 import { logDebug, logWarn, logError } from './services/auditLog';
 import { enforceGlobalMfaPolicy } from './middleware/mfaPolicy';
-import { authenticate } from './middleware/auth';
+import { authenticate, verifyJwtAndLoadUser } from './middleware/auth';
 import { db } from './db/database';
 
 import authRoutes from './routes/auth';
@@ -23,6 +21,7 @@ import tagsRoutes from './routes/tags';
 import categoriesRoutes from './routes/categories';
 import adminRoutes from './routes/admin';
 import mapsRoutes from './routes/maps';
+import airportsRoutes from './routes/airports';
 import filesRoutes from './routes/files';
 import reservationsRoutes from './routes/reservations';
 import dayNotesRoutes from './routes/dayNotes';
@@ -32,14 +31,23 @@ import budgetRoutes from './routes/budget';
 import collabRoutes from './routes/collab';
 import backupRoutes from './routes/backup';
 import oidcRoutes from './routes/oidc';
+import { oauthPublicRouter, oauthApiRouter } from './routes/oauth';
 import vacayRoutes from './routes/vacay';
 import atlasRoutes from './routes/atlas';
 import memoriesRoutes from './routes/memories/unified';
+import photoRoutes from './routes/photos';
 import notificationRoutes from './routes/notifications';
 import shareRoutes from './routes/share';
+import journeyRoutes from './routes/journey';
+import journeyPublicRoutes from './routes/journeyPublic';
+import publicConfigRoutes from './routes/publicConfig';
+import systemNoticesRoutes from './routes/systemNotices';
 import { mcpHandler } from './mcp';
 import { Addon } from './types';
 import { getPhotoProviderConfig } from './services/memories/helpersService';
+import { getCollabFeatures } from './services/adminService';
+import { isAddonEnabled } from './services/adminService';
+import { ADDON_IDS } from './addons';
 
 export function createApp(): express.Application {
   const app = express();
@@ -66,13 +74,31 @@ export function createApp(): express.Application {
   }
 
   const shouldForceHttps = process.env.FORCE_HTTPS === 'true';
+  // HSTS is worth enabling any time we're serving production traffic,
+  // not only when FORCE_HTTPS is set. Self-hosters behind Traefik /
+  // Caddy / Cloudflare Tunnel typically leave FORCE_HTTPS unset (the
+  // proxy handles the redirect for them), and the previous "HSTS off by
+  // default" meant those instances never advertised HSTS at all.
+  //
+  // `includeSubDomains` stays OFF by default on purpose: an instance
+  // running on an apex domain would otherwise force HTTPS on every
+  // sibling subdomain the same operator may still be running over plain
+  // HTTP. Operators who want the stricter policy opt in with
+  // `HSTS_INCLUDE_SUBDOMAINS=true`.
+  const hstsActive = shouldForceHttps || process.env.NODE_ENV === 'production';
+  const hstsIncludeSubdomains = process.env.HSTS_INCLUDE_SUBDOMAINS === 'true';
 
+  // RFC 8414 / RFC 9728: discovery docs are world-readable — open CORS regardless of deployment config
+  app.use(
+    ['/.well-known/oauth-authorization-server', '/.well-known/oauth-protected-resource'],
+    cors({ origin: '*', credentials: false }),
+  );
   app.use(cors({ origin: corsOrigin, credentials: true }));
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
+        scriptSrc: ["'self'", "'wasm-unsafe-eval'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         connectSrc: [
@@ -84,8 +110,11 @@ export function createApp(): express.Application {
           "https://unpkg.com", "https://open-meteo.com", "https://api.open-meteo.com",
           "https://geocoding-api.open-meteo.com", "https://api.exchangerate-api.com",
           "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson",
-          "https://router.project-osrm.org/route/v1/"
+          "https://router.project-osrm.org/route/v1/",
+          "https://api.mapbox.com", "https://*.tiles.mapbox.com", "https://events.mapbox.com"
         ],
+        workerSrc: ["'self'", "blob:"],
+        childSrc: ["'self'", "blob:"],
         fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
         objectSrc: ["'none'"],
         frameSrc: ["'none'"],
@@ -94,11 +123,13 @@ export function createApp(): express.Application {
       }
     },
     crossOriginEmbedderPolicy: false,
-    hsts: shouldForceHttps ? { maxAge: 31536000, includeSubDomains: false } : false,
+    hsts: hstsActive ? { maxAge: 31536000, includeSubDomains: hstsIncludeSubdomains } : false,
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   }));
 
   if (shouldForceHttps) {
     app.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.path === '/api/health') return next();
       if (req.secure || req.headers['x-forwarded-proto'] === 'https') return next();
       res.redirect(301, 'https://' + req.headers.host + req.url);
     });
@@ -142,11 +173,33 @@ export function createApp(): express.Application {
     });
   }
 
-  // Static: avatars and covers are public
+  // Static: avatars, covers, and journey photos.
+  //
+  // Security model (audit SEC-M9): these paths are unauthenticated by
+  // design. All filenames are server-chosen UUID v4 (see `uuid()` in
+  // the multer storage config for avatars / covers / journey uploads),
+  // which gives each asset >122 bits of namespace entropy — not
+  // guessable via enumeration. An attacker would need to have already
+  // seen the URL (email, shared journey, etc.) to request the file.
+  //
+  // Moving these behind auth would also break:
+  //   - Unauthenticated trip-card rendering on public share links
+  //   - Journey public-share pages (/public/journey/:token)
+  //   - Email-embedded avatars
+  //
+  // The `/uploads/photos/...` route below is DIFFERENT: photo URLs are
+  // not embedded in unauthenticated UI contexts, so that endpoint IS
+  // gated (session JWT with pv, or a share token scoped to the photo's
+  // trip).
   app.use('/uploads/avatars', express.static(path.join(__dirname, '../uploads/avatars')));
   app.use('/uploads/covers', express.static(path.join(__dirname, '../uploads/covers')));
+  app.use('/uploads/journey', express.static(path.join(__dirname, '../uploads/journey')));
 
-  // Photos require auth or valid share token
+  // Photos require either a valid logged-in session (via JWT with the
+  // password_version gate) OR a share token that covers the SPECIFIC
+  // photo's trip. Previously any share token for any trip could request
+  // any photo filename by UUID — fine in practice because UUIDs are
+  // unguessable, but the auth model was wrong.
   app.get('/uploads/photos/:filename', (req: Request, res: Response) => {
     const safeName = path.basename(req.params.filename);
     const filePath = path.join(__dirname, '../uploads/photos', safeName);
@@ -154,17 +207,28 @@ export function createApp(): express.Application {
     if (!resolved.startsWith(path.resolve(__dirname, '../uploads/photos'))) {
       return res.status(403).send('Forbidden');
     }
+    // existsSync here is cheap and avoids a sendFile error frame; kept
+    // sync because the handler is already short-lived.
     if (!fs.existsSync(resolved)) return res.status(404).send('Not found');
 
     const authHeader = req.headers.authorization;
-    const token = (req.query.token as string) || (authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null);
-    if (!token) return res.status(401).send('Authentication required');
+    const rawToken = (req.query.token as string) || (authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null);
+    if (!rawToken) return res.status(401).send('Authentication required');
 
-    try {
-      jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-    } catch {
-      const shareRow = db.prepare('SELECT id FROM share_tokens WHERE token = ?').get(token);
-      if (!shareRow) return res.status(401).send('Authentication required');
+    // JWT session path (with pv check).
+    const user = verifyJwtAndLoadUser(rawToken);
+    if (user) return res.sendFile(resolved);
+
+    // Share-token path: require the token to cover the exact trip the
+    // photo belongs to. Expired tokens fall through to 401.
+    const photo = db.prepare('SELECT trip_id FROM photos WHERE filename = ?').get(safeName) as { trip_id: number } | undefined;
+    if (!photo) return res.status(401).send('Authentication required');
+
+    const share = db.prepare(
+      "SELECT trip_id FROM share_tokens WHERE token = ? AND (expires_at IS NULL OR expires_at > datetime('now'))"
+    ).get(rawToken) as { trip_id: number } | undefined;
+    if (!share || share.trip_id !== photo.trip_id) {
+      return res.status(401).send('Authentication required');
     }
     res.sendFile(resolved);
   });
@@ -189,6 +253,7 @@ export function createApp(): express.Application {
   app.use('/api/trips/:tripId/reservations', reservationsRoutes);
   app.use('/api/trips/:tripId/days/:dayId/notes', dayNotesRoutes);
   app.get('/api/health', (_req: Request, res: Response) => res.json({ status: 'ok' }));
+  app.use('/api/config', publicConfigRoutes);
   app.use('/api', assignmentsRoutes);
   app.use('/api/tags', tagsRoutes);
   app.use('/api/categories', categoriesRoutes);
@@ -204,7 +269,7 @@ export function createApp(): express.Application {
       ORDER BY sort_order, id
     `).all() as Array<{ id: string; name: string; icon: string; enabled: number; sort_order: number }>;
     const fields = db.prepare(`
-      SELECT provider_id, field_key, label, input_type, placeholder, required, secret, settings_key, payload_key, sort_order
+      SELECT provider_id, field_key, label, input_type, placeholder, hint, required, secret, settings_key, payload_key, sort_order
       FROM photo_provider_fields
       ORDER BY sort_order, id
     `).all() as Array<{
@@ -213,6 +278,7 @@ export function createApp(): express.Application {
       label: string;
       input_type: string;
       placeholder?: string | null;
+      hint?: string | null;
       required: number;
       secret: number;
       settings_key?: string | null;
@@ -228,6 +294,7 @@ export function createApp(): express.Application {
     }
 
     res.json({
+      collabFeatures: getCollabFeatures(),
       addons: [
         ...addons.map(a => ({ ...a, enabled: !!a.enabled })),
         ...providers.map(p => ({
@@ -242,6 +309,7 @@ export function createApp(): express.Application {
             label: f.label,
             input_type: f.input_type,
             placeholder: f.placeholder || '',
+            hint: f.hint || null,
             required: !!f.required,
             secret: !!f.secret,
             settings_key: f.settings_key || null,
@@ -256,13 +324,26 @@ export function createApp(): express.Application {
   // Addon routes
   app.use('/api/addons/vacay', vacayRoutes);
   app.use('/api/addons/atlas', atlasRoutes);
+  app.use('/api/journeys', (req, res, next) => {
+    if (!isAddonEnabled(ADDON_IDS.JOURNEY)) return res.status(404).json({ error: 'Journey addon is not enabled' });
+    next();
+  }, journeyRoutes);
+  app.use('/api/public/journey', journeyPublicRoutes);
   app.use('/api/integrations/memories', memoriesRoutes);
+  app.use('/api/photos', photoRoutes);
   app.use('/api/maps', mapsRoutes);
+  app.use('/api/airports', airportsRoutes);
   app.use('/api/weather', weatherRoutes);
   app.use('/api/settings', settingsRoutes);
+  app.use('/api/system-notices', systemNoticesRoutes);
   app.use('/api/backup', backupRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api', shareRoutes);
+
+  // OAuth 2.1 — public endpoints (/.well-known, /oauth/token, /oauth/revoke)
+  app.use('/', oauthPublicRouter);
+  // OAuth 2.1 — SPA-facing authenticated endpoints (/api/oauth/*)
+  app.use('/api/oauth', oauthApiRouter);
 
   // MCP endpoint
   app.post('/mcp', mcpHandler);
@@ -292,8 +373,10 @@ export function createApp(): express.Application {
     } else {
       console.error('Unhandled error:', err);
     }
-    const status = err.statusCode || 500;
-    res.status(status).json({ error: 'Internal server error' });
+    const status = err.statusCode || err.status || 500;
+    // Expose the message for client errors (4xx); keep 'Internal server error' for 5xx.
+    const message = status < 500 ? err.message : 'Internal server error';
+    res.status(status).json({ error: message });
   });
 
   return app;
